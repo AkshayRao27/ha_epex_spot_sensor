@@ -271,10 +271,10 @@ class BinarySensor(BinarySensorEntity):
         # calculate the actual duration (in case a duration entity is configured)
         self._calculate_duration()
 
-        # clamp the duration to the available window: if the requested duration is
-        # longer than the window (latest_end - earliest_start), run for the whole
-        # window instead of turning the sensor off.
-        window = latest_end - self._interval_start_time
+        # clamp an oversized duration to the configured window so it runs for the whole
+        # window instead of turning the sensor off. Not _interval_start_time: a
+        # remaining-duration entity moves that to "now".
+        window = latest_end - earliest_start
         if self._duration > window:
             self._duration = window
 
@@ -287,17 +287,21 @@ class BinarySensor(BinarySensorEntity):
 
         if self._interval_mode == IntervalModes.INTERMITTENT.value:
             self._update_state_for_intermittent(
-                self._interval_start_time, latest_end, now
+                self._interval_start_time, latest_end, now, earliest_start
             )
         elif self._interval_mode == IntervalModes.CONTIGUOUS.value:
             self._update_state_for_contiguous(
-                self._interval_start_time, latest_end, now
+                self._interval_start_time, latest_end, now, earliest_start
             )
         else:
             _LOGGER.error(f"invalid interval mode: {self._interval_mode}")
 
     def _update_state_for_intermittent(
-        self, earliest_start: time, latest_end: time, now: datetime
+        self,
+        earliest_start: time,
+        latest_end: time,
+        now: datetime,
+        window_start: datetime,
     ):
         marketdata = self._get_marketdata()
 
@@ -319,8 +323,9 @@ class BinarySensor(BinarySensorEntity):
 
         self._state = is_now_in_intervals(now, intervals)
 
-        # try to calculate intervals for next day also
-        earliest_start += timedelta(days=1)
+        # try to calculate intervals for next day also; tomorrow's window starts at
+        # the configured start, not at a start moved by the remaining-duration entity
+        earliest_start = window_start + timedelta(days=1)
         if earliest_start >= latest_end:
             # do calculation only if latest_end is limited to 24h from earliest_start, # noqa: E501
             # --> avoid calculation if latest_end includes all available marketdata
@@ -347,7 +352,11 @@ class BinarySensor(BinarySensorEntity):
         ]
 
     def _update_state_for_contiguous(
-        self, earliest_start: time, latest_end: time, now: datetime
+        self,
+        earliest_start: time,
+        latest_end: time,
+        now: datetime,
+        window_start: datetime,
     ):
         marketdata = self._get_marketdata()
 
@@ -373,8 +382,9 @@ class BinarySensor(BinarySensorEntity):
                 }
             ]
 
-        # try to calculate intervals for next day also
-        earliest_start += timedelta(days=1)
+        # try to calculate intervals for next day also; tomorrow's window starts at
+        # the configured start, not at a start moved by the remaining-duration entity
+        earliest_start = window_start + timedelta(days=1)
         if earliest_start >= latest_end:
             # do calculation only if latest_end is limited to 24h from earliest_start,
             # --> avoid calculation if latest_end includes all available marketdata
